@@ -1,5 +1,22 @@
 # Nächste Aufgaben
 
+## Übergabe für 29.10.2026
+
+Die Arbeit wurde auf Nutzerwunsch nach Sicherung beendet. Morgen zuerst
+[FORTSETZUNG_MORGEN.md](FORTSETZUNG_MORGEN.md) lesen. Phase 2 wurde ausschließlich
+lesend vorbereitet: alle vier Patchdateien passen zu den installierten Originalen,
+Testports 30220/40220/3307/4793 waren frei und der bestehende Auto-Updater war
+deaktiviert. Es wurde keine Testinstanz eingerichtet und keine Serveränderung
+freigegeben. Zielpfade, unabhängige Test-DB und Zugangskonzept finalisieren,
+anschließend ausdrückliche Installationsfreigabe einholen.
+
+Wichtige Planungsgrenze: Patch-Installer und Updater verweigern aktuell global
+laufende FXServer-Prozesse. Die Produktion darf deshalb nicht für die parallele
+Testvorbereitung gestoppt werden; Testdateien lokal offline patchen und ausschließlich
+in die getrennte Testkopie übertragen. Keine Schutzprüfung blind umgehen.
+
+## Nach der Übergabe weiterzuverfolgen
+
 1. Korrekturpaket reviewen und separat freigegebene Testserverinstallation mit
    Backups durchführen. Erstbeitritt/Reconnect über Clientlogs bestätigen.
 2. Alte Server-Updaterkopie und Task nach eigener Freigabe durch Stage-Version

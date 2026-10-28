@@ -1,5 +1,23 @@
 # Testergebnisse — 28.10.2026
 
+## Ergänzung vor dem Ausschalten
+
+Die lesende Vorprüfung von Phase 2 bestätigt ESX 1.16.3 und FivePRS 0.9.0-ptb.5.
+Alle vier Live-Dateien stimmen nach BOM-/CRLF-Normalisierung exakt mit den
+Patch-Originalen aus PR #1 überein; keine wurde verändert. Ports 30220 TCP/UDP,
+40220, 3307 und 4793 TCP waren frei. Der Auto-Updater wurde erneut lesend als
+`Disabled`, `Enabled=false` festgestellt (28.10.2026, 22:44:39 Uhr Berlin).
+Das sind Zustands-/Versionsprüfungen und keine Live-Join-Tests.
+
+Die GitHub-CI des Implementierungscommits
+`c7ad7c074aa968ca732af820a028a6daf3481898` bestand ebenfalls:
+https://github.com/fynn-2557/linden-rp/actions/runs/40764764341
+In der abschließenden Sicherungsphase wurden nur Dokumente aktualisiert,
+keine neuen Laufzeittests ausgeführt. Anleitung und offene Punkte stehen in
+FORTSETZUNG_MORGEN.md. Testserverinstallation und echter FiveM-Join fehlen weiterhin.
+
+## Bereits ausgeführte Regressionstests
+
 Lokale Umgebung: Windows, Node 24.22.1, Python 3.14/Lupa 2.8 (Lua 5.4),
 PowerShell 7 und Windows PowerShell 5.1. Alle Dateien/Prozesse sind lokale
 Testfixtures; keine Server-, produktiven Bot- oder Datenbankzugriffe.
