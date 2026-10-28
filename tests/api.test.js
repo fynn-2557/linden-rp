@@ -1,8 +1,8 @@
 'use strict';
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
-const {Store}=require('../bot/store');
-const {serve}=require('../bot/api');
+const {Store}=require('../linden_rp/bot/store');
+const {serve}=require('../linden_rp/bot/api');
 const secret='f'.repeat(64);
 test('HTTP API rejects unauthorized requests and never accepts a forged rank',async()=>{
  const store=new Store();const app=store.apply('123456789012345678','police','Michael','Anderson');const approved=store.approve(app.id);
@@ -18,3 +18,4 @@ test('HTTP API rejects unauthorized requests and never accepts a forged rank',as
   const body=await forbidden.json();assert.match(body.error,/Grundausbildung/);
  }finally{await new Promise(resolve=>server.close(resolve));store.close();}
 });
+

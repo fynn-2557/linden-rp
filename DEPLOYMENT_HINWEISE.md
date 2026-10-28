@@ -1,5 +1,14 @@
 # Deployment und Grenzen v0.4
 
+## Korrekturpaket für den schwarzen Bildschirm
+
+Die Installation benötigt zusätzlich den geprüften Offline-Patch aus
+[compat/README.md](compat/README.md), `setr linden_spawn_owner "esx"` und
+`ensure skinchanger` vor ESX. Ein Commit oder Ressourcenupdate allein ändert die
+installierte ESX-/FivePRS-Konfiguration nicht. Vor Live-Betrieb müssen die
+offenen Tests aus [TEST_RESULTS.md](TEST_RESULTS.md) durchgeführt werden.
+Der neue Updater staged nur; Details und Rollback: [AUTO_UPDATE.md](AUTO_UPDATE.md).
+
 - Standard: ESX Legacy + ox_lib + oxmysql, eine **aktive** Framework-Instanz.
 - Alternative: `set linden_framework "qb"` mit **manuell** installiertem qb-core oder `qbx` mit qbx_core; nicht ESX und QB gleichzeitig starten.
 - `linden_rp` bleibt die einzige projektinterne FiveM-Ressource.
@@ -28,3 +37,4 @@ neu installieren.
 Konfigurations-/Kommandozeilenmeldung; ohne die tatsächlich von txAdmin erzeugte
 Serverkonfiguration kann die genaue Ursache nicht sicher bestimmt werden.
 `locale [de] is missing ...` ist eine nicht-kritische Übersetzungswarnung.
+

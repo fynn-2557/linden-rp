@@ -1,141 +1,229 @@
-# Linden RP Windows auto-updater. Only updates resources/[local]/linden_rp.
-# Does not update SQL, ESX, FivePRS, ox_lib, server.cfg or txAdmin itself.
+# Scheduler stages only. Offline activation is an explicit maintenance operation.
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)]
     [string]$ServerDataPath,
+    [ValidateSet('Stage','Check','Activate','Rollback')][string]$Mode = 'Stage',
+    [string]$ExpectedSha,
+    [switch]$ServerStopped,
     [switch]$CheckOnly
 )
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-$serverData = [IO.Path]::GetFullPath($ServerDataPath)
-$target = Join-Path $serverData 'resources\[local]\linden_rp'
-$updateDirectory = Join-Path $serverData '.linden-updater'
-$stateFile = Join-Path $updateDirectory 'installed-commit.txt'
-$logFile = Join-Path $updateDirectory 'updater.log'
-$lockFile = Join-Path $updateDirectory 'updater.lock'
-$repo = 'fynn-2557/linden-rp'
-
-if (-not (Test-Path -LiteralPath (Join-Path $target 'fxmanifest.lua') -PathType Leaf)) {
-    throw "Linden RP not found at $target. Use the txAdmin server-data directory containing resources."
-}
-New-Item -ItemType Directory -Path $updateDirectory -Force | Out-Null
-
-function Write-UpdateLog([string]$Message) {
-    $line = ('{0} {1}' -f [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'), $Message)
-    Write-Host $line
-    [IO.File]::AppendAllText($logFile, $line + [Environment]::NewLine)
-}
-try {
-    $lock = [IO.File]::Open($lockFile, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
-} catch [IO.IOException] {
-    Write-Host 'Another Linden updater is already running; skipping this check.'
-    exit 0
+function Assert-ChildPath($Root, $Path) {
+    $r = [IO.Path]::GetFullPath($Root).TrimEnd('\','/') + [IO.Path]::DirectorySeparatorChar
+    $p = [IO.Path]::GetFullPath($Path)
+    if (-not $p.StartsWith($r, [StringComparison]::OrdinalIgnoreCase)) { throw 'Path escapes updater root.' }
+    $cursor = $p
+    while ($cursor) {
+        if (Test-Path -LiteralPath $cursor) {
+            if ((Get-Item -LiteralPath $cursor -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Reparse points are not supported.' }
+        }
+        $parent = Split-Path -Parent $cursor
+        if ($parent -eq $cursor) { break }
+        $cursor = $parent
+    }
+    return $p
 }
 
-$work = $null
-try {
-    Write-UpdateLog 'Update check started.'
-    $headers = @{
-        'User-Agent' = 'LindenRP-Windows-Updater'
-        'Accept' = 'application/vnd.github+json'
-    }
-    $commit = Invoke-RestMethod -Uri ('https://api.github.com/repos/{0}/commits/main' -f $repo) -Headers $headers -TimeoutSec 30
-    $sha = [string]$commit.sha
-    if ($sha -notmatch '^[a-fA-F0-9]{40}$') {
-        throw 'GitHub did not return a valid commit SHA.'
-    }
-    $previousSha = ''
-    if (Test-Path -LiteralPath $stateFile) {
-        $previousSha = ([IO.File]::ReadAllText($stateFile)).Trim()
-    }
-    if ($previousSha -eq $sha) {
-        Write-UpdateLog ('Current: {0}; no update.' -f $sha.Substring(0, 12))
-        return
-    }
-    if ($CheckOnly) {
-        Write-UpdateLog ('Update available: installed={0}; latest={1}' -f $previousSha, $sha)
-        return
-    }
+function Write-AtomicText($Path, $Text) {
+    $tmp = $Path + '.' + [guid]::NewGuid().ToString('N') + '.tmp'
+    [IO.File]::WriteAllText($tmp, $Text, (New-Object Text.UTF8Encoding($false)))
+    if (Test-Path -LiteralPath $Path) { [IO.File]::Replace($tmp, $Path, ($Path + '.previous')) }
+    else { [IO.File]::Move($tmp, $Path) }
+}
 
-    Write-UpdateLog ('Downloading commit {0}.' -f $sha.Substring(0, 12))
-    $work = Join-Path $updateDirectory ('work-' + [guid]::NewGuid().ToString('N'))
-    $extract = Join-Path $work 'extract'
-    $zipFile = Join-Path $work 'source.zip'
-    New-Item -ItemType Directory -Path $extract -Force | Out-Null
+function Assert-Offline($Confirmed) {
+    if (-not $Confirmed) { throw 'Explicit -ServerStopped required. Keep txAdmin and bot supervisors stopped during maintenance.' }
+    if (Get-Process -Name FXServer -ErrorAction SilentlyContinue) { throw 'FXServer is running; activation refused.' }
+    # The bot writes resource-local runtime data too. Conservatively block any Node process.
+    if (Get-Process -Name node -ErrorAction SilentlyContinue) { throw 'Node is running; stop the bot supervisor before activation.' }
+}
 
-    Invoke-WebRequest -Uri ('https://github.com/{0}/archive/{1}.zip' -f $repo, $sha) -OutFile $zipFile -UseBasicParsing -TimeoutSec 120
+function Get-LatestCommit {
+    $headers = @{ 'User-Agent'='LindenRP-Windows-Updater'; 'Accept'='application/vnd.github+json' }
+    return [string](Invoke-RestMethod -Uri 'https://api.github.com/repos/fynn-2557/linden-rp/commits/main' -Headers $headers -TimeoutSec 30).sha
+}
+
+function Get-ResourceSnapshot($Sha, $Destination) {
+    $zip = Join-Path $Destination 'source.zip'
+    Invoke-WebRequest -Uri ('https://github.com/fynn-2557/linden-rp/archive/{0}.zip' -f $Sha) -OutFile $zip -UseBasicParsing -TimeoutSec 120
     Add-Type -AssemblyName System.IO.Compression.FileSystem
-    [IO.Compression.ZipFile]::ExtractToDirectory($zipFile, $extract)
-    $repoDirectory = @(Get-ChildItem -LiteralPath $extract -Directory)
-    if ($repoDirectory.Count -ne 1) { throw 'Unexpected GitHub archive structure.' }
-    $source = Join-Path $repoDirectory[0].FullName 'linden_rp'
-    if (-not (Test-Path -LiteralPath (Join-Path $source 'fxmanifest.lua') -PathType Leaf)) {
-        throw 'Archive does not contain a valid Linden RP resource.'
-    }
-    $stage = Join-Path $work 'new-resource'
-    Copy-Item -LiteralPath $source -Destination $stage -Recurse -Force
-
-    # These are local runtime data. Never delete or replace them from GitHub.
-    $preserve = @(
-        '.env',
-        'bot\.env',
-        'bot\data',
-        'bot\logs',
-        'bot\node_modules',
-        'data',
-        'logs'
-    )
-    foreach ($relative in $preserve) {
-        $existing = Join-Path $target $relative
-        if (-not (Test-Path -LiteralPath $existing)) { continue }
-        $destination = Join-Path $stage $relative
-        $destinationParent = Split-Path -Parent $destination
-        if (-not (Test-Path -LiteralPath $destinationParent)) {
-            New-Item -ItemType Directory -Path $destinationParent -Force | Out-Null
-        }
-        if (Test-Path -LiteralPath $destination) {
-            Remove-Item -LiteralPath $destination -Recurse -Force
-        }
-        Copy-Item -LiteralPath $existing -Destination $destination -Recurse -Force
-    }
-
-    $backupRoot = Join-Path $updateDirectory 'backups'
-    New-Item -ItemType Directory -Path $backupRoot -Force | Out-Null
-    $timestamp = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmss')
-    $backupPath = Join-Path $backupRoot ('linden_rp_{0}_{1}' -f $timestamp, $sha.Substring(0, 8))
-    if (Test-Path -LiteralPath $backupPath) { throw "Backup folder already exists: $backupPath" }
-
-    $oldMoved = $false
-    try {
-        # The old version stays available as a full rollback copy.
-        Move-Item -LiteralPath $target -Destination $backupPath -ErrorAction Stop
-        $oldMoved = $true
-        Move-Item -LiteralPath $stage -Destination $target -ErrorAction Stop
-        [IO.File]::WriteAllText($stateFile, $sha + [Environment]::NewLine)
-    } catch {
-        # Restore old resource if activation could not complete.
-        if ($oldMoved -and -not (Test-Path -LiteralPath $target) -and (Test-Path -LiteralPath $backupPath)) {
-            Move-Item -LiteralPath $backupPath -Destination $target -ErrorAction Stop
-        }
-        throw
-    }
-
-    Write-UpdateLog ('Installed {0}; changes take effect at the next txAdmin restart. Backup: {1}' -f $sha.Substring(0, 12), $backupPath)
-    # Retain five most recent backups.
-    @(Get-ChildItem -LiteralPath $backupRoot -Directory |
-        Sort-Object -Property LastWriteTimeUtc -Descending |
-        Select-Object -Skip 5) | ForEach-Object {
-            Remove-Item -LiteralPath $_.FullName -Recurse -Force
-        }
-} catch {
-    Write-UpdateLog ('ERROR: ' + $_.Exception.Message)
-    exit 1
-} finally {
-    if ($work -and (Test-Path -LiteralPath $work)) {
-        Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
-    }
-    if ($lock) { $lock.Dispose() }
+    $extract = Join-Path $Destination 'extract'
+    [IO.Compression.ZipFile]::ExtractToDirectory($zip, $extract)
+    $dirs = @(Get-ChildItem -LiteralPath $extract -Directory)
+    if ($dirs.Count -ne 1) { throw 'Unexpected archive layout.' }
+    return (Join-Path $dirs[0].FullName 'linden_rp')
 }
+
+function Get-Inventory($Root) {
+    $rootPath = [IO.Path]::GetFullPath($Root).TrimEnd('\','/')
+    $result = @{}
+    foreach ($item in Get-ChildItem -LiteralPath $Root -Recurse -Force) {
+        $null = Assert-ChildPath $rootPath $item.FullName
+        if ($item.PSIsContainer) { continue }
+        $rel = $item.FullName.Substring($rootPath.Length + 1).Replace('\','/')
+        $result[$rel] = (Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256).Hash
+    }
+    return $result
+}
+
+function Assert-Inventory($Root, $Expected) {
+    $actual = Get-Inventory $Root
+    $properties = @($Expected.PSObject.Properties)
+    if ($actual.Count -ne $properties.Count) { throw 'Staged file inventory changed.' }
+    foreach ($p in $properties) {
+        if ($actual[$p.Name] -ne $p.Value) { throw ('Staged hash mismatch: ' + $p.Name) }
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $Root 'fxmanifest.lua'))) { throw 'Missing resource manifest.' }
+}
+
+function Copy-RuntimeData($From, $To) {
+    foreach ($rel in @('.env','bot/.env','bot/data','bot/logs','bot/node_modules','data','logs')) {
+        $src = Assert-ChildPath $From (Join-Path $From $rel)
+        $dest = Assert-ChildPath $To (Join-Path $To $rel)
+        if (-not (Test-Path -LiteralPath $src)) { continue }
+        if ((Get-Item -LiteralPath $src).PSIsContainer) { $null = Get-Inventory $src }
+        if (Test-Path -LiteralPath $dest) { throw ('Release contains protected runtime path: ' + $rel) }
+        $null = New-Item -ItemType Directory -Path (Split-Path -Parent $dest) -Force
+        Copy-Item -LiteralPath $src -Destination $dest -Recurse -Force
+    }
+}
+
+function Copy-CodeOnly($From, $To) {
+    $inventory = Get-Inventory $From
+    $null = New-Item -ItemType Directory -Path $To
+    foreach ($rel in $inventory.Keys) {
+        if ($rel -match '^(\.env$|bot/\.env$|bot/(data|logs|node_modules)(/|$)|(data|logs)(/|$))') { continue }
+        $dest = Assert-ChildPath $To (Join-Path $To $rel)
+        $null = New-Item -ItemType Directory -Path (Split-Path -Parent $dest) -Force
+        Copy-Item -LiteralPath (Join-Path $From $rel) -Destination $dest
+    }
+}
+
+function Invoke-LindenUpdate($DataPath, $Action, $ApprovedSha, $OfflineConfirmed) {
+    if (-not $DataPath) { throw 'ServerDataPath required.' }
+    $data = [IO.Path]::GetFullPath($DataPath)
+    $target = Assert-ChildPath $data (Join-Path $data 'resources/[local]/linden_rp')
+    if ($Action -ne 'Rollback' -and -not (Test-Path -LiteralPath (Join-Path $target 'fxmanifest.lua'))) { throw 'Linden resource missing.' }
+    $up = Assert-ChildPath $data (Join-Path $data '.linden-updater')
+    $null = New-Item -ItemType Directory -Path $up -Force
+    $lockPath = Join-Path $up 'updater.lock'
+    $lock = [IO.File]::Open($lockPath, 'OpenOrCreate', 'ReadWrite', 'None')
+    try {
+        $pending = Join-Path $up 'pending.json'
+        $journalPath = Join-Path $up 'transaction.json'
+        $statePath = Join-Path $up 'installed-commit.txt'
+        $previous = if (Test-Path -LiteralPath $statePath) { [IO.File]::ReadAllText($statePath).Trim() } else { '' }
+        $journal = if (Test-Path -LiteralPath $journalPath) { Get-Content -LiteralPath $journalPath -Raw | ConvertFrom-Json } else { $null }
+        if ($journal -and $journal.status -eq 'preparing' -and $Action -ne 'Rollback') { throw 'Interrupted transaction: recover with offline Rollback first.' }
+        if ($Action -eq 'Stage' -or $Action -eq 'Check') {
+            $sha = Get-LatestCommit
+            if ($sha -notmatch '^[a-fA-F0-9]{40}$') { throw 'Invalid commit SHA.' }
+            if ($sha -eq $previous) { Write-Output ('Current: ' + $sha); return }
+            if ($Action -eq 'Check') { Write-Output ('Available: ' + $sha); return }
+            if (Test-Path -LiteralPath $pending) {
+                $existing = Get-Content -LiteralPath $pending -Raw | ConvertFrom-Json
+                if ($existing.sha -eq $sha) {
+                    $existingStage = Assert-ChildPath $up $existing.directory
+                    Assert-Inventory $existingStage $existing.files
+                    Write-Output ('Already staged: ' + $sha)
+                    return
+                }
+            }
+            $download = Join-Path $up ('download-' + [guid]::NewGuid().ToString('N'))
+            $null = New-Item -ItemType Directory -Path $download
+            $source = Get-ResourceSnapshot $sha $download
+            if (-not (Test-Path -LiteralPath (Join-Path $source 'fxmanifest.lua'))) { throw 'Archive resource missing.' }
+            $null = Get-Inventory $source
+            foreach ($rel in @('.env','bot/.env','bot/data','bot/logs','bot/node_modules','data','logs')) {
+                if (Test-Path -LiteralPath (Join-Path $source $rel)) { throw ('Release contains protected runtime path: ' + $rel) }
+            }
+            $candidate = Join-Path $up ('stage-' + [guid]::NewGuid().ToString('N'))
+            Copy-Item -LiteralPath $source -Destination $candidate -Recurse
+            $manifest = @{ schema=1; sha=$sha; directory=$candidate; files=(Get-Inventory $candidate); migrationReviewRequired=$true }
+            Write-AtomicText $pending ($manifest | ConvertTo-Json -Depth 6)
+            Write-Output ('Staged ' + $sha + '; offline review/activation required. Active resource untouched.')
+            return
+        }
+        Assert-Offline $OfflineConfirmed
+        if ($Action -eq 'Rollback') {
+            if (-not $journal -or $journal.status -notin @('preparing','activated')) { throw 'No recoverable transaction.' }
+            $backup = Assert-ChildPath $up $journal.backup
+            if (Test-Path -LiteralPath $backup) {
+                if (-not (Test-Path -LiteralPath (Join-Path $backup 'fxmanifest.lua'))) { throw 'Invalid backup.' }
+                if (Test-Path -LiteralPath $target) {
+                    $restore = Join-Path $up ('restore-' + [guid]::NewGuid().ToString('N'))
+                    Copy-CodeOnly $backup $restore
+                    Copy-RuntimeData $target $restore
+                    Assert-Offline $OfflineConfirmed
+                    Move-Item -LiteralPath $target -Destination (Join-Path $up ('rollback-displaced-' + [guid]::NewGuid().ToString('N')))
+                    Move-Item -LiteralPath $restore -Destination $target
+                } else { Copy-Item -LiteralPath $backup -Destination $target -Recurse }
+            } elseif ($journal.status -ne 'preparing' -or -not (Test-Path -LiteralPath $target)) { throw 'Backup missing.' }
+            Write-AtomicText $statePath ([string]$journal.previousSha + [Environment]::NewLine)
+            $journal.status = 'rolledBack'
+            Write-AtomicText $journalPath ($journal | ConvertTo-Json -Depth 6)
+            Write-Output 'Rollback complete. Reconcile displaced runtime data before restarting the bot.'
+            return
+        }
+        if (-not (Test-Path -LiteralPath $pending)) { throw 'No staged release.' }
+        $release = Get-Content -LiteralPath $pending -Raw | ConvertFrom-Json
+        if ($release.sha -notmatch '^[a-fA-F0-9]{40}$' -or $ApprovedSha -ne $release.sha) { throw 'ExpectedSha must match the reviewed staged commit.' }
+        $stage = Assert-ChildPath $up $release.directory
+        Assert-Inventory $stage $release.files
+        $candidate = Join-Path $up ('activate-' + [guid]::NewGuid().ToString('N'))
+        Copy-Item -LiteralPath $stage -Destination $candidate -Recurse
+        Copy-RuntimeData $target $candidate
+        $backup = Join-Path $up ('backup-' + [guid]::NewGuid().ToString('N'))
+        $journal = @{ status='preparing'; backup=$backup; previousSha=$previous; sha=$release.sha }
+        Write-AtomicText $journalPath ($journal | ConvertTo-Json -Depth 6)
+        $oldMoved = $false
+        $newMoved = $false
+        try {
+            Assert-Offline $OfflineConfirmed
+            Move-Item -LiteralPath $target -Destination $backup
+            $oldMoved = $true
+            Move-Item -LiteralPath $candidate -Destination $target
+            $newMoved = $true
+            Write-AtomicText $statePath ($release.sha + [Environment]::NewLine)
+            $journal.status = 'activated'
+            Write-AtomicText $journalPath ($journal | ConvertTo-Json -Depth 6)
+        } catch {
+            if ($newMoved) { Move-Item -LiteralPath $target -Destination (Join-Path $up ('failed-' + [guid]::NewGuid().ToString('N'))) }
+            if ($oldMoved) { Move-Item -LiteralPath $backup -Destination $target }
+            Write-AtomicText $statePath ($previous + [Environment]::NewLine)
+            $journal.status = 'rolledBack'
+            Write-AtomicText $journalPath ($journal | ConvertTo-Json -Depth 6)
+            throw
+        }
+        Write-Output ('Activated ' + $release.sha + '; backup: ' + $backup)
+    } finally { $lock.Dispose() }
+}
+
+if ($MyInvocation.InvocationName -ne '.') {
+    try {
+        if ($CheckOnly) { $Mode = 'Check' }
+        Invoke-LindenUpdate $ServerDataPath $Mode $ExpectedSha ([bool]$ServerStopped) |
+            ForEach-Object {
+                Write-Output $_
+                $log = Join-Path ([IO.Path]::GetFullPath($ServerDataPath)) '.linden-updater/updater.log'
+                [IO.File]::AppendAllText($log, [DateTime]::UtcNow.ToString('o') + ' ' + $_ + [Environment]::NewLine)
+            }
+    } catch {
+        $failure = $_
+        try {
+            if ($ServerDataPath) {
+                $logRoot = Join-Path ([IO.Path]::GetFullPath($ServerDataPath)) '.linden-updater'
+                $logPath = Assert-ChildPath $logRoot (Join-Path $logRoot 'updater.log')
+                if (Test-Path -LiteralPath $logRoot) {
+                    [IO.File]::AppendAllText($logPath, [DateTime]::UtcNow.ToString('o') + ' ERROR: ' + $failure.Exception.Message + [Environment]::NewLine)
+                }
+            }
+        } catch { Write-Warning 'Could not write updater error log.' }
+        Write-Error $failure
+        exit 1
+    }
+}
+

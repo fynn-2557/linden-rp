@@ -24,7 +24,7 @@ $updateHome = Join-Path $serverData '.linden-updater'
 New-Item -ItemType Directory -Path $updateHome -Force | Out-Null
 $installed = Join-Path $updateHome 'update-linden.ps1'
 Copy-Item -LiteralPath $source -Destination $installed -Force
-$arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -ServerDataPath "{1}"' -f $installed, $serverData
+$arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -ServerDataPath "{1}" -Mode Stage' -f $installed, $serverData
 $action = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -Argument $arguments
 # Task runs every 5 minutes, even without an interactive Windows login.
 $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration (New-TimeSpan -Days 3650)
@@ -33,5 +33,7 @@ Register-ScheduledTask -TaskName 'LindenRP-AutoUpdate' -Action $action -Trigger 
 Write-Host 'Task LindenRP-AutoUpdate installed (every 5 minutes).'
 Write-Host ('Server-data: ' + $serverData)
 Write-Host ('Log: ' + (Join-Path $updateHome 'updater.log'))
-Write-Host 'Updates do not restart FXServer: configure a scheduled restart in txAdmin.'
+Write-Host 'The scheduled task only stages updates; restarts do NOT activate them.'
+Write-Host 'Activation requires offline maintenance, reviewed ExpectedSha and -Mode Activate -ServerStopped.'
 Write-Host 'Test immediately: schtasks /Run /TN "LindenRP-AutoUpdate"'
+

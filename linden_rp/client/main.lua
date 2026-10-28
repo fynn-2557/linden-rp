@@ -15,10 +15,16 @@ RegisterCommand('fahrzeugfunk', function() ui('radio') end, false)
 RegisterCommand('melder', function() ui('pager') end, false)
 RegisterCommand('leitstellecreator', function() ui('creator') end, false)
 
-RegisterNUICallback('close', function(_, cb)
+local function closeUi()
+  if not open then return end
   open = false
   SetNuiFocus(false, false)
+  SetNuiFocusKeepInput(false)
   SendNUIMessage({ type = 'close' })
+end
+
+RegisterNUICallback('close', function(_, cb)
+  closeUi()
   cb({ ok = true })
 end)
 
@@ -55,6 +61,7 @@ RegisterNetEvent('ld:radio', function(channel)
   end
 end)
 
-AddEventHandler('onResourceStop', function(name)
-  if name == GetCurrentResourceName() and open then SetNuiFocus(false, false) end
+AddEventHandler('onClientResourceStop', function(name)
+  if name == GetCurrentResourceName() then closeUi() end
 end)
+

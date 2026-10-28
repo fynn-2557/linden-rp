@@ -10,3 +10,6 @@
 *.sqlite3
 *.log
 .DS_Store
+
+__pycache__/
+tests/.tmp/

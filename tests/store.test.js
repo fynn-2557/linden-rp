@@ -1,7 +1,7 @@
 'use strict';
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
-const {Store}=require('../bot/store');
+const {Store}=require('../linden_rp/bot/store');
 const discord='123456789012345678';const license='license:'+'a'.repeat(40);const license2='license:'+'b'.repeat(40);
 const fresh=()=>new Store();
 function approve(store,id=discord,dept='police',first='Michael',last='Anderson'){
@@ -74,7 +74,7 @@ test('Code erneut ausstellen invalidiert alten Code',()=>{
 });
 
 test('NRW-Rangmodell enthält keine US-Police-Officer-Grade',()=>{
- const {RANKS,FF_RANKS}=require('../bot/store');
+ const {RANKS,FF_RANKS}=require('../linden_rp/bot/store');
  assert.equal(RANKS.police[0],'Polizeikommissar/-in');
  assert.equal(RANKS.fire[0],'Brandmeister/-in');
  assert.equal(RANKS.ems.at(-1),'Notfallsanitäter/-in');
@@ -125,3 +125,4 @@ test('FF braucht BF-Ausbildung, genehmigten Zivilcharakter, Einweisung und Führ
  assert.equal(s.state(discord,license).ff.leadershipApproved,true);
  assert.equal(s.state(discord,license).ff.unit,'Löschzug 1');s.close();
 });
+
