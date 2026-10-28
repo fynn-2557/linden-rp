@@ -1,53 +1,67 @@
-# Linden RP – automatische GitHub-Updates (Windows)
+# Windows-Updater: Staging und kontrollierte Aktivierung
 
-## Was automatisch passiert?
+Der Fünf-Minuten-Task führt ausschließlich `-Mode Stage` aus. Er lädt einen
+konkreten GitHub-Commit von `main`, prüft die Archivstruktur und erzeugt eine
+Staging-Kopie mit SHA-256-Dateiinventar und `pending.json`. Wiederholte Prüfungen
+desselben unbeschädigten Stands laden kein zweites Archiv. Die aktive Ressource
+und `installed-commit.txt` werden beim Staging nicht verändert.
 
-- Die Windows-Aufgabenplanung startet alle **5 Minuten** einen Update-Check.
-- Der Updater liest den letzten Commit von https://github.com/fynn-2557/linden-rp (Branch main).
-- Bei einer neuen Version lädt er ein ZIP dieses **konkreten Commits** herunter, prüft die Ressourcenstruktur und ersetzt **nur** die projektinterne FiveM-Ressource `resources/[local]/linden_rp`.
-- Die vorherige Version wird in `.linden-updater/backups` gesichert; maximal fünf Backups bleiben erhalten.
-- Die lokale `bot/.env`, `bot/data`, `bot/logs`, `bot/node_modules` sowie `data`/`logs` bleiben erhalten.
-- Im Log `.linden-updater/updater.log` steht, welches Commit installiert wurde.
-- Die neue Lua-/NUI-Version wird **erst beim nächsten FXServer-Neustart** zuverlässig aktiv. Richte in **txAdmin → Settings → Restarter** mindestens einen geplanten Neustart ein.
+## Bestehende Installation
 
-**Wichtig:** Der Updater kann die Dateien im laufenden Betrieb austauschen. Wenn Windows einen Austausch aufgrund laufender Programme sperrt, wird der Versuch protokolliert und später wiederholt. Plane Upgrades vorzugsweise in wartungsarmen Zeiten. Ein laufender separater Discord-Bot muss nach einem Bot-Code-Update ebenfalls neu gestartet werden.
+Die Kopie `.linden-updater/update-linden.ps1` wird NICHT durch den Ressourcen-
+Updater selbst aktualisiert. `tools/install-auto-update.ps1` muss nach Review
+und gesonderter Serverfreigabe erneut lokal auf dem Server ausgeführt werden.
+Bis dahin bleibt der alte Updater mit seinem bisherigen Verhalten aktiv.
+Es wurde im Rahmen dieses PRs keine Windows-Aufgabe verändert.
 
-## Einmalige Einrichtung auf dem Windows-Server
+## Wartungsablauf
 
-1. Lade aus dem Repository **Code → Download ZIP** herunter, und entpacke das ZIP auf dem Server, oder hole die beiden Skripte aus `tools/`.
-2. Ermittle deinen **server-data-Ordner**, in dem `resources/[local]/linden_rp/fxmanifest.lua` liegt. Beispiel: `C:\FXServer\txData\LindenRP.base`. **Nicht** den FXServer-Binary-Ordner angeben.
-3. Öffne **PowerShell als Administrator**, gehe in den entpackten Repository-Ordner und führe aus:
+1. `pending.json`, den Commit-Diff und insbesondere Schema-/Datenänderungen
+   prüfen. Der Updater führt keine SQL-Migrationen aus; neue Ressourcen können
+   beim nächsten Start aber eigene Migrationen ausführen. Dafür sind separat
+   freigegebene DB-Backups und ein Migrationsplan erforderlich.
+2. Vor Aktivierung FXServer und den Discord-Bot kontrolliert offline nehmen
+   und ihre Neustartaufsichten für das Wartungsfenster pausieren. Diese Skripte
+   stoppen oder starten keine Prozesse. Der Operator hält das Wartungsfenster
+   bis zum Ende der Transaktion geschlossen; eine Prozessprüfung allein ist
+   keine Sperre gegen einen gleichzeitig von außen ausgelösten Neustart.
+3. Offline aktivieren (vollständige geprüfte SHA einsetzen):
+   `powershell.exe -NoProfile -File tools/update-linden.ps1 -ServerDataPath <Pfad> -Mode Activate -ExpectedSha <40-stellige-SHA> -ServerStopped`
+4. Der Updater verweigert dies bei laufendem FXServer oder Node-Prozess sowie
+   bei einer abweichenden SHA oder verändertem Staging-Inventar. Die Node-
+   Prüfung ist absichtlich konservativ und kann auch andere Node-Anwendungen
+   auf diesem Server erfassen.
+5. Erst nach erfolgreicher Aktivierung und Prüfung kontrolliert starten und
+   den dokumentierten Join-/Charakter-Smoke-Test ausführen.
 
-   ```powershell
-   powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\install-auto-update.ps1 -ServerDataPath 'C:\FXServer\txData\LindenRP.base'
-   ```
+Die Aktivierung übernimmt lokale `.env`, `bot/.env`, `bot/data`, `bot/logs`,
+`bot/node_modules`, `data` und `logs` aus der offline genommenen Ressource in
+eine separate Aktivierungskopie. Die vorherige vollständige Ressource wird
+unter `.linden-updater/backup-<UUID>` aufbewahrt. Es wird kein `server.cfg`, ESX,
+FivePRS oder Datenbankinhalt bearbeitet. Junctions/Symlinks werden abgewiesen.
 
-   Ersetze den Beispielpfad durch deinen tatsächlichen server-data-Ordner.
+## Fehler und Rollback
 
-4. Starte einen ersten Durchlauf:
-   ```powershell
-   schtasks /Run /TN "LindenRP-AutoUpdate"
-   ```
-5. Prüfe das Log `<server-data>\.linden-updater\updater.log`. Dort steht entweder `Installed ...` oder `no update` beziehungsweise eine Fehlermeldung.
-6. Konfiguriere in txAdmin **Settings → Restarter** eine Zeit für den nächsten automatischen Serverneustart.
+Vor Dateiumbenennungen wird ein Transaktionsjournal geschrieben. Fehlschläge
+nach dem Versionswechsel einschließlich eines Fehlers beim Schreiben der
+installierten SHA führen zur Rücksicherung der alten Ressource. Ein Prozess-
+oder Rechnerabbruch hinterlässt gegebenenfalls `status=preparing`; weitere
+Updates werden dann bis zur Offline-Recovery abgewiesen.
 
-## Manuelles Prüfen, ohne Dateien zu verändern
+`powershell.exe -NoProfile -File tools/update-linden.ps1 -ServerDataPath <Pfad> -Mode Rollback -ServerStopped`
 
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\update-linden.ps1 -ServerDataPath 'C:\FXServer\txData\LindenRP.base' -CheckOnly
-```
+Rollback stellt alten Code her und übernimmt, sofern eine aktuelle Ressource
+vorliegt, deren neueste lokale Laufzeitdaten. Die ursprüngliche Sicherung
+bleibt unverändert. Die verdrängte Version wird ebenfalls aufbewahrt. Ein
+Rollback kann Schemaänderungen nicht rückgängig machen; dafür ist das separat
+geprüfte Datenbankbackup erforderlich. Nach einem Abbruch während der Recovery
+erneut prüfen und Offline-Rollback wiederholen, bevor etwas gestartet wird.
 
-## Rollback / Update anhalten
+Alle Metadaten-/Staging-/Backup-Pfade bleiben im Updater-Verzeichnis. Ein
+exklusiver Dateilock verhindert parallele Updater. Es gibt keine automatische
+rekursive Löschung von Backups oder Downloads. Speicherplatz ist vor dem
+Wartungsfenster zu prüfen; alte Artefakte nach Review manuell archivieren.
 
-- Updater deaktivieren: `schtasks /Change /TN "LindenRP-AutoUpdate" /DISABLE`.
-- Wieder aktivieren: `schtasks /Change /TN "LindenRP-AutoUpdate" /ENABLE`.
-- Rollback bei gestopptem Server: `resources/[local]/linden_rp` sichern oder umbenennen, eine ältere Version aus `.linden-updater/backups` an den Platz von `linden_rp` kopieren, und `installed-commit.txt` entfernen. Den Updater zunächst deaktiviert lassen, da er sonst wieder auf den neuesten Commit aktualisiert.
-
-## Grenzen und Sicherheitsregeln
-
-- Aktualisiert **nur** `linden_rp`. **Keine** Updates für `ox_lib`, ESX, oxmysql, FivePRS, kostenpflichtige Scripts, Datenbanken, `server.cfg` oder den separat laufenden Discord-Bot-Prozess.
-- Änderungen an der **Recipe** gelten nicht rückwirkend für einen bereits installierten Server.
-- Datenbankmigrationen oder inkompatible Änderungen müssen weiterhin bewusst geprüft werden.
-- Der Windows-Task läuft als **SYSTEM**. Verwende diese Automatisierung nur auf einem Server, den du administrierst und dessen GitHub-Repository und Commits du kontrollierst. Schütze dein GitHub-Konto mit 2FA: Ein fremder Commit auf main würde beim nächsten Neustart als FiveM-Code ausgeführt.
-- Ein automatischer Download ersetzt **keine Live-Tests**. Das Projekt bleibt ein Teststand.
-- Das Setup wurde hier strukturell erstellt, aber **nicht auf deinem Windows-Server ausgeführt oder gegen txAdmin live getestet**.
+`-Mode Check` bzw. das kompatible `-CheckOnly` zeigt nur den verfügbaren Commit.
+Ergebnisse und Fehler des Kommandoaufrufs landen in `updater.log`.
+SHA-256 prüft lokale Staging-Integrität, keine unabhängige Release-Signatur.
