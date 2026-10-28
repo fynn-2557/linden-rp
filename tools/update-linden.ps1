@@ -12,16 +12,16 @@ $ProgressPreference = 'SilentlyContinue'
 
 $serverData = [IO.Path]::GetFullPath($ServerDataPath)
 $target = Join-Path $serverData 'resources\[local]\linden_rp'
-$home = Join-Path $serverData '.linden-updater'
-$stateFile = Join-Path $home 'installed-commit.txt'
-$logFile = Join-Path $home 'updater.log'
-$lockFile = Join-Path $home 'updater.lock'
+$updateDirectory = Join-Path $serverData '.linden-updater'
+$stateFile = Join-Path $updateDirectory 'installed-commit.txt'
+$logFile = Join-Path $updateDirectory 'updater.log'
+$lockFile = Join-Path $updateDirectory 'updater.lock'
 $repo = 'fynn-2557/linden-rp'
 
 if (-not (Test-Path -LiteralPath (Join-Path $target 'fxmanifest.lua') -PathType Leaf)) {
     throw "Linden RP not found at $target. Use the txAdmin server-data directory containing resources."
 }
-New-Item -ItemType Directory -Path $home -Force | Out-Null
+New-Item -ItemType Directory -Path $updateDirectory -Force | Out-Null
 
 function Write-UpdateLog([string]$Message) {
     $line = ('{0} {1}' -f [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'), $Message)
@@ -37,6 +37,7 @@ try {
 
 $work = $null
 try {
+    Write-UpdateLog 'Update check started.'
     $headers = @{
         'User-Agent' = 'LindenRP-Windows-Updater'
         'Accept' = 'application/vnd.github+json'
@@ -60,7 +61,7 @@ try {
     }
 
     Write-UpdateLog ('Downloading commit {0}.' -f $sha.Substring(0, 12))
-    $work = Join-Path $home ('work-' + [guid]::NewGuid().ToString('N'))
+    $work = Join-Path $updateDirectory ('work-' + [guid]::NewGuid().ToString('N'))
     $extract = Join-Path $work 'extract'
     $zipFile = Join-Path $work 'source.zip'
     New-Item -ItemType Directory -Path $extract -Force | Out-Null
@@ -101,7 +102,7 @@ try {
         Copy-Item -LiteralPath $existing -Destination $destination -Recurse -Force
     }
 
-    $backupRoot = Join-Path $home 'backups'
+    $backupRoot = Join-Path $updateDirectory 'backups'
     New-Item -ItemType Directory -Path $backupRoot -Force | Out-Null
     $timestamp = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmss')
     $backupPath = Join-Path $backupRoot ('linden_rp_{0}_{1}' -f $timestamp, $sha.Substring(0, 8))
