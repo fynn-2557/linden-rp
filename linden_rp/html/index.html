@@ -1,0 +1,21 @@
+<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Characters | RP Terminal</title><link rel="stylesheet" href="style.css"></head>
+<body>
+ <div class="page">
+  <header class="mast">
+   <div><span class="eyebrow">PERSONNEL SYSTEM / 01</span><h1>Characters<span class="title-dot">.</span></h1><p class="intro">Verwalte deine freigegebenen Identitäten und Rollen.</p></div>
+   <div class="header-right"><span id="connection" class="conn">VERBINDE...</span><button class="outline" id="refresh">Aktualisieren ↻</button></div>
+  </header>
+  <div id="flash" role="status" class="flash" hidden></div>
+  <section class="workspace">
+   <aside class="departments"><div class="group-label">DEINE BEREICHE</div><div id="categories"></div><div class="aside-note">Neue Behörden werden über den Discord-Bot beantragt und vom Serverteam genehmigt.</div></aside>
+   <main class="content">
+    <div class="section-heading"><div><span class="eyebrow" id="current-dept">DEPARTMENT</span><h2>Identitäten <span class="count" id="count">0</span></h2></div><div class="header-right"><button id="redeem-code" class="outline">Code einlösen</button><button id="new" class="primary">+ New Character</button></div></div>
+    <div id="characters" class="character-list"></div>
+    <div id="empty" class="empty"><div class="empty-mark">✳</div><h3>Deine Charaktere erscheinen hier.</h3><p>Du hast einen Code per Discord-DM erhalten? Löse ihn hier ein, um den Hauptcharakter deiner Behörde freizuschalten.</p><button class="primary" id="first-code">Charakter-Code einlösen</button></div>
+   </main>
+  </section>
+  <footer><span>RP IDENTITY · FivePRS Integration</span><span>Hauptcharaktere <span class="star">★</span> &nbsp; Temporäre Charaktere <span class="temp-marker">TEMP</span></span></footer>
+ </div>
+ <dialog id="modal"><form method="dialog" id="modal-form"><button class="close" value="cancel" aria-label="Schließen">×</button><span class="eyebrow" id="modal-eyebrow">IDENTITY</span><h2 id="modal-title">Charakter erstellen</h2><div id="modal-body"></div><menu><button type="button" class="outline" id="cancel">Abbrechen</button><button type="submit" class="primary" id="submit">Bestätigen</button></menu></form></dialog>
+ <script src="https://cfx-nui-fiveprs/nui/app-sdk.js"></script><script src="app.js"></script>
+</body></html>

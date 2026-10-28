@@ -1,0 +1,67 @@
+$engine: 3
+$onesync: on
+name: Linden RP NRW – FivePRS & ESX (TEST ONLY)
+version: 0.4.0
+author: Linden RP Projekt
+description: Development server with FivePRS, Linden RP, ESX Legacy, ox_lib and oxmysql. Requires Discord bot configuration and live integration tests.
+
+tasks:
+  - action: download_github
+    src: https://github.com/fynn-2557/linden-rp
+    ref: main
+    dest: ./tmp/linden_repo
+
+  - action: move_path
+    src: ./tmp/linden_repo/deploy/server.cfg
+    dest: ./server.cfg
+
+  - action: connect_database
+
+  - action: download_github
+    src: https://github.com/citizenfx/cfx-server-data
+    ref: master
+    subpath: resources
+    dest: ./resources/[cfx-default]
+
+  - action: download_github
+    src: https://github.com/esx-framework/esx_core
+    ref: main
+    dest: ./tmp/esx_core
+
+  - action: query_database
+    file: ./tmp/esx_core/[SQL]/legacy.sql
+
+  - action: move_path
+    src: ./tmp/esx_core/[core]
+    dest: ./resources/[esx]
+
+  - action: download_file
+    path: ./tmp/oxmysql.zip
+    url: https://github.com/CommunityOx/oxmysql/releases/latest/download/oxmysql.zip
+
+  - action: unzip
+    src: ./tmp/oxmysql.zip
+    dest: ./resources/[standalone]
+
+  - action: download_file
+    path: ./tmp/ox_lib.zip
+    url: https://github.com/CommunityOx/ox_lib/releases/latest/download/ox_lib.zip
+
+  - action: unzip
+    src: ./tmp/ox_lib.zip
+    dest: ./resources/[standalone]
+
+  - action: download_file
+    path: ./tmp/fiveprs.zip
+    url: https://github.com/FivePRS/core/releases/download/v0.9.0-ptb.5/fiveprs-0.9.0-ptb.5.zip
+
+  - action: unzip
+    src: ./tmp/fiveprs.zip
+    dest: ./resources/[standalone]
+
+  - action: move_path
+    src: ./tmp/linden_repo/linden_rp
+    dest: ./resources/[local]/linden_rp
+
+  - action: remove_path
+    path: ./tmp

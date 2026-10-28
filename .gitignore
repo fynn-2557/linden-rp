@@ -1,0 +1,12 @@
+# Never commit real credentials or runtime data
+.env
+.env.*
+!.env.example
+**/node_modules/
+**/data/
+**/logs/
+*.db
+*.sqlite
+*.sqlite3
+*.log
+.DS_Store

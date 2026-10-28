@@ -1,0 +1,9 @@
+{
+  "name": "rp-framework-discord-bot",
+  "private": true,
+  "version": "0.2.0",
+  "description": "Discord approvals and FiveM identity bridge",
+  "engines": {"node": ">=22.13.0"},
+  "scripts": {"start":"node main.js", "test":"node --test ../tests/*.test.js"},
+  "dependencies": {"discord.js":"^14.21.0", "dotenv":"^16.6.1"}
+}
