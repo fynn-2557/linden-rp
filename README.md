@@ -43,3 +43,10 @@ neu installieren.
 Konfigurations-/Kommandozeilenmeldung; ohne die tatsächlich von txAdmin erzeugte
 Serverkonfiguration kann die genaue Ursache nicht sicher bestimmt werden.
 `locale [de] is missing ...` ist eine nicht-kritische Übersetzungswarnung.
+
+
+## Automatische Updates nach GitHub-Push (Windows)
+
+Ein Windows-Task kann alle 5 Minuten neue Commits von main abrufen und nur die FiveM-Ressource linden_rp aktualisieren. Backups und Logs bleiben erhalten; lokale Discord-Bot-Secrets werden nicht überschrieben. Damit die neue Version tatsächlich lädt, richte einen geplanten txAdmin-Neustart ein.
+
+**Einrichtung und Rollback:** [AUTO_UPDATE.md](AUTO_UPDATE.md). Die Einrichtung muss einmal direkt auf dem Windows-Server erfolgen; die txAdmin-Recipe allein kann keinen Task auf deinem Windows-Host anlegen.
